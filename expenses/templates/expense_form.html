@@ -23,7 +23,7 @@ Expense Form
                 {% csrf_token %}
                 {{ form.as_p }}
                 <div class="text-center mt-3">
-                    <button type="submit" name="form_type" value="expense" class="btn btn-primary">Add</button>
+                    <button type="submit" name="form_type" value="expense" class="btn btn-primary">Edit</button>
                     <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
                 </div>
             </form>
