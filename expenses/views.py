@@ -8,6 +8,7 @@ from .forms import ExpenseForm, CategoryForm, PaymentMethodForm, SpendingForm, L
 from django.core.paginator import Paginator
 from django.contrib import messages
 from datetime import datetime
+from django.utils import timezone
 
 
 def investments(request):
@@ -32,9 +33,9 @@ def expense_list(request):
 
     # Apply filters
     if start_date:
-        expenses = expenses.filter(created_at__date__gte=start_date)
+        expenses = expenses.filter(created_at__gte=start_date)
     if end_date:
-        expenses = expenses.filter(created_at__date__lte=end_date)
+        expenses = expenses.filter(created_at__lte=end_date)
     if category_filter:
         expenses = expenses.filter(category__name=category_filter)
     if payment_method:
@@ -59,8 +60,8 @@ def expense_list(request):
         if form2.is_valid():
             expense = form2.save(commit=False)
             expense.user = request.user
-            expense.created_at = datetime.now()
-            expense.updated_at = datetime.now()
+            expense.created_at = timezone.now()
+            expense.updated_at = timezone.now()
             expense.save()
             return redirect('expenses')
     else:
@@ -87,8 +88,8 @@ def expense_add(request):
             form = ExpenseForm(request.POST, user=request.user)
             expense = form.save(commit=False)
             expense.user = request.user
-            expense.created_at = datetime.now()
-            expense.updated_at = datetime.now()
+            expense.created_at = timezone.now()
+            expense.updated_at = timezone.now()
             expense.save()
             return redirect('expenses') 
         elif form_type == "category":
@@ -126,12 +127,14 @@ def expense_add(request):
 @login_required
 def expense_update(request, expense_id):
     expense = get_object_or_404(Expenses, pk=expense_id, user=request.user, deleted=0)
+    expense_created_time = expense.created_at
     if request.method == 'POST':
         form = ExpenseForm(request.POST, instance=expense, user=request.user)
         if form.is_valid():
             edited_expense = form.save(commit=False)
             edited_expense.user = request.user
-            edited_expense.updated_at = datetime.now()
+            edited_expense.created_at = expense_created_time
+            edited_expense.updated_at = timezone.now()
             edited_expense.save()
             return redirect('expenses')
     else:
