@@ -182,6 +182,7 @@ def category_add(request):
             user = request.user
             if Category.objects.filter(name=category_name, user=user, deleted=0).exists():
                 messages.error(request, "This category already exists.")
+                return redirect('category_update')
             else:
                 category = form.save(commit=False)
                 category.user = user
@@ -198,9 +199,13 @@ def category_update(request, category_id):
         form = CategoryForm(request.POST, instance=category)
         if form.is_valid():
             edited_category = form.save(commit=False)
-            edited_category.user = request.user
-            edited_category.save()
-            return redirect('category_list')
+            if Category.objects.filter(name=edited_category.name, user=request.user, deleted=0).exists():
+                messages.error(request, "This category already exists. Try different name.")
+                return redirect('category_update', category_id=category_id)
+            else:
+                edited_category.user = request.user
+                edited_category.save()
+                return redirect('category_list')
     else:
         form = CategoryForm(instance=category)
     return render(request, 'category_form.html', {'form': form})
@@ -263,9 +268,13 @@ def payment_method_update(request, payment_method_id):
         form = PaymentMethodForm(request.POST, instance=payment_method)
         if form.is_valid():
             edited_payment_method = form.save(commit=False)
-            edited_payment_method.user = request.user
-            edited_payment_method.save()
-            return redirect('payment_method_list')
+            if PaymentMethod.objects.filter(name=edited_payment_method.name, user=request.user, deleted=0).exists():
+                messages.error(request, "This payment method already exists. Try different name.")
+                return redirect('payment_method_update', payment_method_id=payment_method_id)
+            else:
+                edited_payment_method.user = request.user
+                edited_payment_method.save()
+                return redirect('payment_method_list')
     else:
         form = PaymentMethodForm(instance=payment_method)
     return render(request, 'payment_method_form.html', {'form': form})

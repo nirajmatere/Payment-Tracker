@@ -22,7 +22,11 @@ Payment Method Form
 
     {{ form.as_p }}
 
-    <button type="submit" name="form_type" value="payment_method" class="btn btn-primary">Add</button>
+    {% if form.instance.pk %} 
+        <button type="submit" name="form_type" value="payment_method" class="btn btn-primary">Edit</button> 
+    {% else %} 
+        <button type="submit" name="form_type" value="payment_method" class="btn btn-primary">Add</button>
+    {% endif %}
     <a href="{% url 'payment_method_list' %}" class="btn btn-secondary">Back to payment method list</a>
     <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
     
