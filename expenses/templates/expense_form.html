@@ -1,0 +1,78 @@
+{% extends "layout.html" %}
+
+{% block title %}
+Expense Form
+{% endblock %}
+
+{% block content %}
+{% if messages%}
+    {% for message in messages %}
+        <div class="alert alert-info">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+<div class="container mt-5">
+{% if form.instance.pk %}
+<div class="row">
+    <!-- Left Half: Expense Form -->
+    <div class="col-md-6">
+        <div class="card p-4 shadow-lg">
+            <h2 class="text-center">
+                Edit Expense
+            </h2>
+            <form method="POST" enctype="multipart/form-data" class="form">
+                {% csrf_token %}
+                {{ form.as_p }}
+                <div class="text-center mt-3">
+                    <button type="submit" name="form_type" value="expense" class="btn btn-primary">Add</button>
+                    <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
+                </div>
+            </form>
+        </div>
+    </div>
+{% else %}
+
+
+    <div class="row">
+        <!-- Left Half: Expense Form -->
+        <div class="col-md-6">
+            <div class="card p-4 shadow-lg">
+                <h2 class="text-center">
+                    Add Expense
+                </h2>
+                <form method="POST" enctype="multipart/form-data" class="form">
+                    {% csrf_token %}
+                    {{ form.as_p }}
+                    <div class="text-center mt-3">
+                        <button type="submit" name="form_type" value="expense" class="btn btn-primary">Add</button>
+                        <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Right Half: Category and Payment Method Forms -->
+        <div class="col-md-6">
+            <div class="card p-4 shadow-lg mb-4">
+                <h3> Add New Category </h2>
+                <form method="POST" class="form">
+                    {% csrf_token %}
+                    {{ form2.as_p }}
+                    <button type="submit" name="form_type" value="category" class="btn btn-primary">Add</button>
+                    <a href="{% url 'category_list' %}" class="btn btn-secondary">Back to category list</a>
+                </form>
+            </div>
+            <div class="card p-4 shadow-lg">
+                <h3>Add New Payment Method </h3>
+                <form method="POST" class="form">
+                    {% csrf_token %}
+                    {{ form3.as_p }}
+                    <button type="submit" name="form_type" value="payment_method" class="btn btn-primary">Add</button>
+                    <a href="{% url 'payment_method_list' %}" class="btn btn-secondary">Back to payment method list</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

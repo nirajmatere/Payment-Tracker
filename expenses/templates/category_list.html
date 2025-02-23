@@ -1,0 +1,50 @@
+{% extends "layout.html" %}
+{% block title %}
+Category List
+{% endblock %}
+{% block content %}
+<h1>Category List</h1>
+
+<div class="row">
+    <div class="col-md-7">
+        <a href="{% url 'category_add' %}" class="btn btn-primary">Add New Category</a>
+        <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for category in categories %}
+                <tr>
+                    <td>{{ category.name }}</td>
+                    <td>
+                        <a href="{% url 'category_update' category.pk%}" class="btn btn-warning btn-sm">Edit</a>
+                        <a href="{% url 'category_delete' category.pk %}" class="btn btn-danger btn-sm">Delete</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="col-md-4">
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-info">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        <div class="card p-4 shadow-lg mb-4">
+            <h3> Add New Category </h2>
+            <form method="POST" class="form">
+                {% csrf_token %}
+                {{ form.as_p }}
+                <button type="submit" name="form_type" value="category" class="btn btn-primary">Add</button>
+                <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
+            </form>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

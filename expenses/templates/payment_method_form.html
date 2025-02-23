@@ -1,0 +1,30 @@
+{% extends "layout.html" %}
+
+{% block title %}
+Payment Method Form
+{% endblock %}
+
+{% block content %}
+<h2>
+    {% if form.instance.pk %} 
+        Edit Payment Method 
+    {% else %} 
+        Add Payment Method
+    {% endif %}
+</h2>
+<form method="POST" class="form">
+    {% csrf_token %}
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-info">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    {{ form.as_p }}
+
+    <button type="submit" name="form_type" value="payment_method" class="btn btn-primary">Add</button>
+    <a href="{% url 'payment_method_list' %}" class="btn btn-secondary">Back to payment method list</a>
+    <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
+    
+</form>
+{% endblock %}

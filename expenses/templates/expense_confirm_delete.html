@@ -1,0 +1,18 @@
+{% extends "layout.html" %}
+
+{% block title %}
+Expense Delete
+{% endblock %}
+
+{% block content %}
+<h1>Delete Expense</h1>
+<h2>Are you sure you want to delete "{{ expense.item }}" expense?</h2>
+
+    <form method="POST" class="form">
+        {% csrf_token %}
+       
+        <button type="submit" class="btn btn-danger">Delete</button>
+        <a href="{% url 'expenses' %}" class="btn btn-secondary">Cancel</a>
+    </form>
+
+{% endblock %}

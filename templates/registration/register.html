@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+
+{% block title %}
+Register Page
+{% endblock %}
+
+{% block content %}
+<div class="container justify-content-center align-items-center">
+    <div class="col-md-6">
+    <div class="card shadow-lg mt-5">
+    <div class="card-header text-center">
+        <h4>New Registration</h4>
+    </div>
+    <div class="card-body">
+    <form method="POST">
+        {% csrf_token %}
+
+        {{form.as_p}}
+        <button class="btn btn-primary"> Register </button>
+    </form>
+    <p>Already have an account?
+    <a href="{% url 'login' %}">Login</a></p>
+    </div>
+    </div>
+</div>
+</div>
+{% endblock %}

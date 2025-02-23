@@ -1,0 +1,12 @@
+{% extends "layout.html" %}
+{% block title %}
+Payment Method Confirm Delete
+{% endblock %}
+{% block content %}
+<h2>Are you sure you want to delete "{{ payment_method.name }}" payment method?</h2>
+<form method="POST" class="form">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">Delete</button>
+    <a href="{% url 'payment_method_list' %}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

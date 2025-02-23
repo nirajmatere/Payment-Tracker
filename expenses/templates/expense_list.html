@@ -1,0 +1,144 @@
+{% extends "layout.html" %}
+
+{% block title %}
+Expense List
+{% endblock %}
+
+{% block content %}
+{% comment %} <h1 class="mb-2">Expenses</h1> {% endcomment %}
+
+
+<div class="row">
+    <div class="col-md-3">
+        <div class="card p-4 shadow-lg ">
+            <h2 class="text-center">
+                Add Expense
+            </h2>
+            <form method="POST" enctype="multipart/form-data" class="form">
+                {% csrf_token %}
+                {{ form2.as_p }}
+                <div class="text-center mt-3">
+                    <button type="submit" name="form_type" value="expense" class="btn btn-primary">Add</button>
+                </div>
+            </form>
+        </div>
+    </div>
+<div class="col-md-9">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+            <a class="btn btn-primary me-2" href="{% url 'expense_add' %}">Add Expense</a>
+            <a class="btn btn-secondary me-2" href="{% url 'category_list' %}">Category</a>
+            <a class="btn btn-secondary me-2" href="{% url 'payment_method_list' %}">Payment Method</a>
+        </div>
+    
+        <div>
+            <div class="card bg-body-tertiary" style="max-width: 18rem;">
+                <div class="card-header">Total Expenses = {{ total_expense|floatformat:0 }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Form -->
+        <div class="mb-2">
+            <form method="get" action="{% url 'expenses' %}">
+                <div class="row">
+                    <!-- Start Date -->
+                    <div class="col-md-2">
+                        <label class="d-flex align-items-end" for="start_date" class="form-label">Start Date</label>
+                        <input type="date" name="start_date" value="{{ start_date }}" class="form-control">
+                    </div>
+                    <!-- End Date -->
+                    <div class="col-md-2">
+                        <label class="d-flex align-items-end" for="end_date" class="form-label">End Date</label>
+                        <input type="date" name="end_date" value="{{ end_date }}" class="form-control"> 
+                    </div>
+                    <!-- Category -->
+                    <div class="col-md-3">
+                        <label for="category" class="d-flex align-items-end">Category</label>
+                        <select name="category" class="form-select">
+                            <option value="">Select Category</option>
+                            {% for cat in categories %}
+                                <option value="{{ cat.name }}" {% if cat.name == category_filter %}selected{% endif %}>{{ cat.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <!-- Payment Method -->
+                    <div class="col-md-3">
+                        <label for="payment_method" class="d-flex align-items-end">Payment Method</label>
+                        <select name="payment_method" class="form-select">
+                            <option value="">Select Payment Method</option>
+                            {% for pm in payment_methods %}
+                                <option value="{{ pm.name }}" {% if pm.name == payment_method %}selected{% endif %}>{{ pm.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <!-- Filter Button -->
+                    <div class="col-md-2">
+                        <label>&nbsp;</label>
+                        <button type="submit" class="btn btn-primary w-100">Apply Filter</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    
+
+<!-- Expense Table -->
+<div class="table-responsive">
+    <table class="table table-striped table-sm align-middle">
+        <thead class="table">
+            <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Item</th>
+                <th scope="col">Price</th>
+                <th scope="col">Expense Category</th>
+                <th scope="col">Payment Method</th>
+                <th scope="col">Actions</th>
+            </tr>
+        </thead>
+        <tbody class="table-group-divider">
+            {% for expense in expenses %}
+            <tr>
+                <td>{{ expense.created_at|date:"d-m-Y" }}</td>
+                <td>{{ expense.item }}</td>
+                <td>{{ expense.price|floatformat:0 }}</td>
+                <td>{{ expense.category }}</td>
+                <td>{{ expense.payment_method }}</td>
+                <td>
+                    <a href="{% url 'expense_update' expense.id %}" class="btn btn-warning btn-sm">Edit</a>
+                    <a href="{% url 'expense_delete' expense.id %}" class="btn btn-danger btn-sm">Delete</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+</div>
+
+<!-- Pagination Controls -->
+<nav class="d-flex justify-content-center">
+    <ul class="pagination">
+        {% if expenses.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?page=1&start_date={{ start_date }}&end_date={{ end_date }}&category={{ category }}&payment_method={{ payment_method }}">&laquo; First</a>
+            </li>
+            <li class="page-item">
+                <a class="page-link" href="?page={{ expenses.previous_page_number }}&start_date={{ start_date }}&end_date={{ end_date }}&category={{ category }}&payment_method={{ payment_method }}">Previous</a>
+            </li>
+        {% endif %}
+
+        <li class="page-item disabled">
+            <span class="page-link">Page {{ expenses.number }} of {{ expenses.paginator.num_pages }}</span>
+        </li>
+
+        {% if expenses.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ expenses.next_page_number }}&start_date={{ start_date }}&end_date={{ end_date }}&category={{ category }}&payment_method={{ payment_method }}">Next</a>
+            </li>
+            <li class="page-item">
+                <a class="page-link" href="?page={{ expenses.paginator.num_pages }}&start_date={{ start_date }}&end_date={{ end_date }}&category={{ category }}&payment_method={{ payment_method }}">Last &raquo;</a>
+            </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endblock %}

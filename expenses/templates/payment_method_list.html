@@ -1,0 +1,51 @@
+{% extends "layout.html" %}
+{% block title %}
+Payment Method List
+{% endblock %}
+{% block content %}
+<h1>Payment Method List</h1>
+
+
+<div class="row">
+    <div class='col-md-7'>
+        <a href="{% url 'payment_method_add' %}" class="btn btn-primary">Add Payment Method</a>
+        <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Payment Method</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for payment_method in payment_methods %}
+                <tr>
+                    <td>{{ payment_method.name }}</td>
+                    <td>
+                        <a href="{% url 'payment_method_update' payment_method.pk %}" class="btn btn-warning btn-sm">Edit</a>
+                        <a href="{% url 'payment_method_delete' payment_method.pk %}" class="btn btn-danger btn-sm">Delete</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="col-md-4">
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-info">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        <div class="card p-4 shadow-lg mb-4">
+            <h3> Add New Payment Method </h2>
+            <form method="POST" class="form">
+                {% csrf_token %}
+                {{ form.as_p }}
+                <button type="submit" name="form_type" value="payment_method" class="btn btn-primary">Add</button>
+                <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
+            </form>
+    </div>
+</div>
+
+
+{% endblock %}

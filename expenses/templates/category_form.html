@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+{% block title %}
+Category Form
+{% endblock %}
+{% block content %}
+<h2>
+    {% if form.instance.pk %} 
+        Edit Category 
+    {% else %} 
+        Add Category
+    {% endif %}
+</h2>
+<form method="POST" class="form">
+    {% csrf_token %}
+    {% if messages %}
+    {% for message in messages %}
+        <div class="alert alert-info">{{ message }}</div>
+    {% endfor %}
+    {% endif %}
+    {{ form.as_p }}
+
+    <button type="submit" name="form_type" value="category" class="btn btn-primary">Add</button>
+    <a href="{% url 'category_list' %}" class="btn btn-secondary">Back to category list</a>
+    <a href="{% url 'expenses' %}" class="btn btn-secondary">Back to expense list</a>
+    
+</form>
+{% endblock %}
