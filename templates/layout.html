@@ -95,6 +95,13 @@
                 ><i class="bi bi-envelope"></i
                 ><span class="d-none d-sm-inline ms-2">Spendings</span>
               </a>
+              <a
+                class="nav-link theme-text"
+                style="white-space: nowrap"
+                href="{% url 'groups' %}"
+                ><i class="bi bi-envelope"></i
+                ><span class="d-none d-sm-inline ms-2">Groups</span>
+              </a>
             </nav>
           </div>
         </div>
@@ -128,6 +135,16 @@
           </nav>
 
           <div class="container">
+
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
             {% block content %}  
               default:"Content goes here"
             {% endblock %}

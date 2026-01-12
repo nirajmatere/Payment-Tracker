@@ -14,11 +14,7 @@ Payment Method Form
 </h2>
 <form method="POST" class="form">
     {% csrf_token %}
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-info">{{ message }}</div>
-        {% endfor %}
-    {% endif %}
+
 
     {{ form.as_p }}
 

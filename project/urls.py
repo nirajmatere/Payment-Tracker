@@ -20,10 +20,14 @@ from . import views
 from django.conf import settings
 from django.conf.urls.static import static 
 
+from django.views.generic import RedirectView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('expenses/', include('expenses.urls')),
     path('accounts/', include('django.contrib.auth.urls')),
     path('register/', views.user_registration, name='register'),
+    path('groups/', include('groups.urls')),
+    path('', RedirectView.as_view(url='/expenses/', permanent=False)),
 
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

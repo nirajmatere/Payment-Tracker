@@ -1,0 +1,44 @@
+{% extends "layout.html" %}
+
+{% block title %}
+Groups
+{% endblock %}
+
+{% block content %}
+    <h2>Groups</h2>
+    {% comment %} <a href="{% url 'group_add' %}" class="btn btn-primary">Add Group</a> {% endcomment %}
+    <div class="row row-cols-1 row-cols-md-4 g-4 text-decoration-none">
+        {% for item in groups_data %}
+            <div class="col">
+                <a href="{% url 'group_detail' item.group.id %}" class="text-decoration-none text-dark">
+                    <div class="card h-100 shadow-sm hover-shadow">
+                        {% comment %} <img src="{{ item.group.group_images.url }}" class="card-img-top" alt="{{ item.group.name }}" style="height: 150px; object-fit: cover;"> {% endcomment %}
+                        <div class="card-body">
+                            <h5 class="card-title">{{ item.group.name }}</h5>
+                            <div class="card-text">
+                                {% if item.balances %}
+                                    {% for bal in item.balances %}
+                                        <div class="mb-1">
+                                            {% if bal.amount > 0 %}
+                                                <span class="text-success fw-bold">Gets back {{ bal.amount|floatformat:2 }} {{ bal.currency }}</span>
+                                            {% else %}
+                                                <span class="text-danger fw-bold">Owes {{ bal.amount|stringformat:"+f"|slice:"1:" }} {{ bal.currency }}</span>
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="text-secondary">Settled up</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        {% empty %}
+            <div class="col-12">
+                <p>No groups found.</p>
+            </div>
+        {% endfor %}
+    </div>
+    
+{% endblock %}

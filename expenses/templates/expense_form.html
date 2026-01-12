@@ -5,11 +5,7 @@ Expense Form
 {% endblock %}
 
 {% block content %}
-{% if messages%}
-    {% for message in messages %}
-        <div class="alert alert-info">{{ message }}</div>
-    {% endfor %}
-{% endif %}
+
 <div class="container mt-5">
 {% if form.instance.pk %}
 <div class="row">

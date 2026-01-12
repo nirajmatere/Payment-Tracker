@@ -1,0 +1,90 @@
+{% extends "layout.html" %}
+
+{% block title %}
+Add Group
+{% endblock %}
+
+{% block content %}
+<h2 class="text-center mt-4">Create New Group</h2>
+<div class="container mt-5">
+    <div class="card shadow-sm p-4">
+        <form method="POST" enctype="multipart/form-data" class="form">
+            {% csrf_token %}
+            <div class="mb-3">
+                <label for="id_name" class="form-label">Group Name</label>
+                {{ form.name }}
+            </div>
+            
+            <div class="mb-3">
+                <label for="id_group_image" class="form-label">Group Image</label>
+                {{ form.group_image }}
+            </div>
+            
+            <div class="mb-3">
+                <label for="id_users" class="form-label">Select Users</label>
+                    <select id="id_users" name="users" class="form-select" multiple>
+                        {% for user in form.users.field.queryset %}
+                            <option value="{{ user.id }}">{{ user.username }}</option>
+                        {% endfor %}
+                    </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100">Add Group</button>
+        </form>
+    </div>
+</div>
+
+<style>
+    @media (prefers-color-scheme: dark) {
+        .ts-dropdown {
+            background-color: #1e1e1e; /* Dark dropdown background */
+            color: #ffffff; /* White text */
+            border: 1px solid #444;
+        }
+
+        .ts-dropdown .option,
+        .ts-dropdown .selected {
+            color: #ffffff; /* White text */
+            background-color: #252526;
+        }
+
+        .ts-dropdown .option:hover {
+            background-color: #444; /* Slightly lighter for hover */
+        }
+    }
+</style>
+<!-- Include Tom Select -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select/dist/css/tom-select.bootstrap5.min.css">
+<script src="https://cdn.jsdelivr.net/npm/tom-select/dist/js/tom-select.complete.min.js"></script>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        new TomSelect("#id_users", {
+            plugins: ["remove_button"],  // Allow removing selected items
+            create: false,  // No custom user input
+            render: {
+                option: function(data, escape) {
+                    return `<div class="py-2 px-3">${escape(data.text)}</div>`;
+                },
+                item: function(data, escape) {
+                    return `<span class="badge bg-primary me-1">${escape(data.text)}</span>`;
+                }
+            }
+        });
+    });
+    
+</script>
+
+{% comment %} <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css">
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        new Choices("#id_users", {
+            removeItemButton: true,  // Allows users to remove selected items
+            searchEnabled: true,  // Enables search
+            placeholderValue: "Select users"
+        });
+    });
+</script> {% endcomment %}
+{% endblock %}
