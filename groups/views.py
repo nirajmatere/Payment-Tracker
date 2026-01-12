@@ -3,13 +3,26 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.utils import timezone
 from .models import groups, GroupExpense, ExpenseSplit, ExpensePayment
-from .forms import GroupExpenseForm
+from .forms import GroupExpenseForm, GroupForm
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.contrib import messages
 from django.db.models import Sum
 
 # Create your views here.
+
+# Helper function to check member debt
+def get_user_balance_in_group(user, group):
+    """
+    Returns True if the user has a non-zero balance (owe or owed) in ANY currency.
+    """
+    currencies = GroupExpense.objects.filter(group=group, deleted=0).values_list('currency', flat=True).distinct()
+    for currency in currencies:
+        paid = ExpensePayment.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount'))['amount__sum'] or 0
+        owed = ExpenseSplit.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
+        if abs(paid - owed) > 0.01:
+            return True # User has outstanding balance
+    return False
 
 @login_required
 def group_list(request):
@@ -38,6 +51,68 @@ def group_list(request):
         })
         
     return render(request, 'group_list.html', {'groups_data': groups_data})
+
+@login_required
+def group_add(request):
+    if request.method == 'POST':
+        form = GroupForm(request.POST, request.FILES)
+        if form.is_valid():
+            new_group = form.save()
+            # Ensure the creator is part of the group
+            new_group.users.add(request.user)
+            messages.success(request, 'Group created successfully!')
+            return redirect('groups')
+    else:
+        form = GroupForm()
+    
+    return render(request, 'group_form.html', {'form': form})
+
+@login_required
+def group_edit(request, group_id):
+    group = get_object_or_404(groups, pk=group_id, users=request.user, deleted=0)
+    
+    if request.method == 'POST':
+        form = GroupForm(request.POST, request.FILES, instance=group)
+        if form.is_valid():
+            # Validate user removal
+            original_members = set(group.users.all())
+            new_members = set(form.cleaned_data['users'])
+            removed_members = original_members - new_members
+            
+            error_found = False
+            for member in removed_members:
+                if get_user_balance_in_group(member, group):
+                    messages.error(request, f"Cannot remove {member.username} because they have an outstanding balance.")
+                    error_found = True
+            
+            if not error_found:
+                form.save()
+                messages.success(request, 'Group updated successfully!')
+                return redirect('group_detail', group_id=group.id)
+    else:
+        form = GroupForm(instance=group)
+    
+    return render(request, 'group_form.html', {'form': form, 'group': group})
+
+@login_required
+def group_delete(request, group_id):
+    group = get_object_or_404(groups, pk=group_id, users=request.user, deleted=0)
+    
+    if request.method == 'POST':
+        # Check if anyone in the group has a balance
+        # If any user in the group has a non-zero balance in any currency, cannot delete.
+        members = group.users.all()
+        for member in members:
+            if get_user_balance_in_group(member, group):
+                messages.error(request, "Cannot delete group because there are unsettled debts.")
+                return redirect('group_detail', group_id=group.id)
+
+        group.deleted = True
+        group.save()
+        messages.success(request, 'Group deleted successfully!')
+        return redirect('groups')
+    
+    return render(request, 'group_confirm_delete.html', {'group': group})
 
 @login_required
 def group_detail(request, group_id):

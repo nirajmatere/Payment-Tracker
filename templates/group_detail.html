@@ -3,7 +3,11 @@
 {% block content %}
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>{{ group.name }}</h2>
+        <div class="d-flex align-items-center">
+             <h2 class="mb-0 me-3">{{ group.name }}</h2>
+             <a href="{% url 'group_edit' group.id %}" class="btn btn-outline-secondary btn-sm me-1" title="Edit Group"><i class="bi bi-pencil"></i></a>
+             <a href="{% url 'group_delete' group.id %}" class="btn btn-outline-danger btn-sm" title="Delete Group"><i class="bi bi-trash"></i></a>
+        </div>
         <a href="{% url 'add_group_expense' group.id %}" class="btn btn-primary">Add Expense</a>
     </div>
 
