@@ -99,8 +99,18 @@
                 class="nav-link theme-text"
                 style="white-space: nowrap"
                 href="{% url 'groups' %}"
-                ><i class="bi bi-envelope"></i
+                ><i class="bi bi-people"></i
                 ><span class="d-none d-sm-inline ms-2">Groups</span>
+              </a>
+              <a
+                class="nav-link theme-text"
+                style="white-space: nowrap"
+                href="{% url 'notifications' %}"
+                ><i class="bi bi-bell"></i
+                ><span class="d-none d-sm-inline ms-2">Notifications</span>
+                {% if unread_notification_count > 0 %}
+                    <span class="badge bg-danger rounded-pill ms-1">{{ unread_notification_count }}</span>
+                {% endif %}
               </a>
             </nav>
           </div>

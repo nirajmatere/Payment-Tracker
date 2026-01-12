@@ -1,0 +1,64 @@
+{% extends 'layout.html' %}
+{% load static %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Notifications</h2>
+            <a href="{% url 'mark_all_as_read' %}" class="btn btn-sm btn-outline-primary">Mark All as Read</a>
+        </div>
+
+        {% if notifications %}
+            <div class="list-group">
+                {% for n in notifications %}
+                    <div class="list-group-item list-group-item-action flex-column align-items-start {% if not n.is_read %}fw-bold{% endif %}" style="{% if not n.is_read %}border-left: 5px solid #0d6efd;{% endif %}">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">
+                                <a href="{{ n.related_link|default:'#' }}" class="text-decoration-none text-reset">
+                                    {% if n.notification_type == 'GROUP_ADD' %}
+                                        <i class="bi bi-people-fill text-primary me-2"></i>
+                                    {% elif n.notification_type == 'EXPENSE_ADD' %}
+                                        <i class="bi bi-cash-stack text-success me-2"></i>
+                                    {% elif n.notification_type == 'SETTLEMENT' %}
+                                        <i class="bi bi-check-circle-fill text-info me-2"></i>
+                                    {% else %}
+                                        <i class="bi bi-bell-fill text-warning me-2"></i>
+                                    {% endif %}
+                                    {{ n.message }}
+                                </a>
+                            </h5>
+                            <div class="d-flex align-items-center">
+                                <small class="text-muted me-2">{{ n.created_at|timesince }} ago</small>
+                                {% if not n.is_read %}
+                                    <a href="{% url 'mark_as_read' n.id %}" class="btn btn-sm btn-outline-secondary" title="Mark as Read">
+                                        <i class="bi bi-check2"></i>
+                                    </a>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                        {# Invitation Actions #}
+                        {% if n.notification_type == 'INVITATION' and n.invitation and n.invitation.status == 'PENDING' %}
+                            <div class="mt-2 text-end">
+                                <a href="{% url 'accept_invitation' n.invitation.id %}" class="btn btn-sm btn-success me-1">Accept</a>
+                                <a href="{% url 'decline_invitation' n.invitation.id %}" class="btn btn-sm btn-danger">Decline</a>
+                            </div>
+                        {% endif %}
+
+                        <a href="{{ n.related_link|default:'#' }}" class="text-decoration-none text-reset">
+                            <p class="mb-1"></p>
+                            <small class="text-muted">Type: {{ n.get_notification_type_display }}</small>
+                        </a>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="alert alert-info text-center">
+                <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+                Looking clean! You have no notifications.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

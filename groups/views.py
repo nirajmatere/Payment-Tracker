@@ -2,14 +2,17 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.utils import timezone
-from .models import groups, GroupExpense, ExpenseSplit, ExpensePayment
+from .models import groups, GroupExpense, ExpenseSplit, ExpensePayment, GroupInvitation
 from .forms import GroupExpenseForm, GroupForm
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.contrib import messages
 from django.db.models import Sum
+from notifications.models import Notification
 
 # Create your views here.
+
+from decimal import Decimal
 
 # Helper function to check member debt
 def get_user_balance_in_group(user, group):
@@ -18,9 +21,24 @@ def get_user_balance_in_group(user, group):
     """
     currencies = GroupExpense.objects.filter(group=group, deleted=0).values_list('currency', flat=True).distinct()
     for currency in currencies:
-        paid = ExpensePayment.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount'))['amount__sum'] or 0
-        owed = ExpenseSplit.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
-        if abs(paid - owed) > 0.01:
+        # Filter ExpensePayment and ExpenseSplit by deleted=0 as well for robustness
+        paid = ExpensePayment.objects.filter(
+            expense__group=group, 
+            expense__currency=currency, 
+            user=user, 
+            expense__deleted=0,
+            deleted=0
+        ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+        
+        owed = ExpenseSplit.objects.filter(
+            expense__group=group, 
+            expense__currency=currency, 
+            user=user, 
+            expense__deleted=0,
+            deleted=0
+        ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or Decimal('0.00')
+        
+        if abs(paid - owed) > Decimal('0.01'):
             return True # User has outstanding balance
     return False
 
@@ -30,24 +48,67 @@ def group_list(request):
     groups_data = []
     user_groups = groups.objects.filter(users=user, deleted=0)
     
+    # --- Bulk Fetch Balances to fix N+1 Query Issue ---
+    
+    # 1. Fetch total paid by user per (group, currency)
+    payments = ExpensePayment.objects.filter(
+        expense__group__in=user_groups,
+        user=user,
+        expense__deleted=0,
+        deleted=0
+    ).values('expense__group', 'expense__currency').annotate(total_paid=Sum('amount'))
+    
+    # Map: (group_id, currency) -> amount
+    payment_map = {}
+    for p in payments:
+        k = (p['expense__group'], p['expense__currency'])
+        payment_map[k] = p['total_paid']
+
+    # 2. Fetch total owed by user per (group, currency)
+    splits = ExpenseSplit.objects.filter(
+        expense__group__in=user_groups,
+        user=user,
+        expense__deleted=0,
+        deleted=0
+    ).values('expense__group', 'expense__currency').annotate(total_owed=Sum('amount_owed'))
+    
+    # Map: (group_id, currency) -> amount
+    split_map = {}
+    for s in splits:
+        k = (s['expense__group'], s['expense__currency'])
+        split_map[k] = s['total_owed']
+        
+    # 3. Identify all unique currencies per group to display
+    # This is a bit tricky since we need currencies even if balance is 0?
+    # Usually we only care about non-zero balances or active currencies.
+    # Let's fetch all currencies used in these groups.
+    group_currencies = GroupExpense.objects.filter(
+        group__in=user_groups, 
+        deleted=0
+    ).values_list('group', 'currency').distinct()
+    
+    currency_map = {} # group_id -> set(currencies)
+    for g_id, curr in group_currencies:
+        if g_id not in currency_map: currency_map[g_id] = set()
+        currency_map[g_id].add(curr)
+
     for group in user_groups:
-        # Calculate net balance for this user in this group PER CURRENCY
-        # Identify currencies in this group
-        currencies = GroupExpense.objects.filter(group=group, deleted=0).values_list('currency', flat=True).distinct()
-        if not currencies:
-             currencies = ['USD']
-            
         balances = []
+        # Get currencies for this group, default to USD if none
+        currencies = currency_map.get(group.id, {'USD'})
+        if not currencies: currencies = {'USD'} # Fallback if set is empty
+        
         for currency in currencies:
-            paid = ExpensePayment.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount'))['amount__sum'] or 0
-            owed = ExpenseSplit.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
-            net = float(paid - owed)
-            if abs(net) > 0.01:
+            paid = payment_map.get((group.id, currency), Decimal('0.00'))
+            owed = split_map.get((group.id, currency), Decimal('0.00'))
+            
+            net = paid - owed
+            if abs(net) > Decimal('0.01'):
                 balances.append({'currency': currency, 'amount': net})
         
         groups_data.append({
             'group': group,
-            'balances': balances # List of {currency, amount}
+            'balances': balances 
         })
         
     return render(request, 'group_list.html', {'groups_data': groups_data})
@@ -57,15 +118,81 @@ def group_add(request):
     if request.method == 'POST':
         form = GroupForm(request.POST, request.FILES)
         if form.is_valid():
-            new_group = form.save()
-            # Ensure the creator is part of the group
+            new_group = form.save(commit=False)
+            new_group.save() # Save main object to get ID
+            
+            # Creator is always added directly
             new_group.users.add(request.user)
-            messages.success(request, 'Group created successfully!')
+            
+            # For other users, create invitations
+            selected_users = form.cleaned_data['users']
+            for user in selected_users:
+                if user != request.user:
+                    # Create Invitation
+                    invitation = GroupInvitation.objects.create(
+                        group=new_group,
+                        sender=request.user,
+                        receiver=user,
+                        status='PENDING'
+                    )
+                    
+                    # Notify
+                    Notification.objects.create(
+                        user=user,
+                        message=f"{request.user.username} has invited you to join the group '{new_group.name}'.",
+                        notification_type='INVITATION',
+                        related_link=f"/groups/invitations/",
+                        invitation=invitation
+                    )
+
+            messages.success(request, 'Group created! Invitations sent.')
             return redirect('groups')
     else:
         form = GroupForm()
     
     return render(request, 'group_form.html', {'form': form})
+
+@login_required
+def accept_invitation(request, invitation_id):
+    invitation = get_object_or_404(GroupInvitation, pk=invitation_id, receiver=request.user, status='PENDING')
+    
+    # Add user to group
+    group = invitation.group
+    group.users.add(request.user)
+    
+    # Update Status
+    invitation.status = 'ACCEPTED'
+    invitation.save()
+    
+    # Notify Sender
+    Notification.objects.create(
+        user=invitation.sender,
+        message=f"{request.user.username} accepted your invitation to '{group.name}'.",
+        notification_type='SYSTEM',
+        related_link=f"/groups/{group.id}/"
+    )
+    
+    # Find original notification and mark as read? Optional.
+    
+    messages.success(request, f"You have joined '{group.name}'.")
+    return redirect('groups')
+
+@login_required
+def decline_invitation(request, invitation_id):
+    invitation = get_object_or_404(GroupInvitation, pk=invitation_id, receiver=request.user, status='PENDING')
+    
+    invitation.status = 'DECLINED'
+    invitation.save()
+    
+    # Notify Sender
+    Notification.objects.create(
+        user=invitation.sender,
+        message=f"{request.user.username} declined your invitation to '{invitation.group.name}'.",
+        notification_type='SYSTEM',
+    )
+    
+    messages.info(request, "Invitation declined.")
+    return redirect('notifications')
 
 @login_required
 def group_edit(request, group_id):
@@ -86,8 +213,53 @@ def group_edit(request, group_id):
                     error_found = True
             
             if not error_found:
-                form.save()
-                messages.success(request, 'Group updated successfully!')
+                # Save non-M2M fields (name, image)
+                group = form.save(commit=False)
+                group.save()
+                
+                # Handle M2M: users
+                # We want to Keep: Original - Removed
+                # We want to Invite: Added
+                
+                # 1. Update Group Users (Remove those who were unchecked)
+                # But wait, form.save_m2m() (if we called it) would set it to 'new_members'.
+                # We are NOT calling form.save_m2m(). We will manually set users.
+                
+                final_direct_members = list(original_members - removed_members)
+                # Ensure creator/editor is kept? Logic implies they should be in 'new_members' if not unchecked.
+                # If user unchecked themselves?
+                
+                group.users.set(final_direct_members)
+                
+                # 2. Invite New Members
+                added_members = new_members - original_members
+                for member in added_members:
+                    if member != request.user:
+                        # Check if invite already exists?
+                        existing_invite = GroupInvitation.objects.filter(group=group, receiver=member, status='PENDING').exists()
+                        if not existing_invite:
+                             invitation = GroupInvitation.objects.create(
+                                group=group,
+                                sender=request.user,
+                                receiver=member,
+                                status='PENDING'
+                            )
+                            
+                             Notification.objects.create(
+                                user=member,
+                                message=f"{request.user.username} has invited you to join the group '{group.name}'.",
+                                notification_type='INVITATION',
+                                related_link=f"/groups/invitations/",
+                                invitation=invitation
+                            )
+                
+                # Re-add success message for removals?
+                # "Group updated successfully!" cover it.
+                if added_members:
+                    messages.success(request, f"Group updated! Invitations sent to {len(added_members)} new users.")
+                else:
+                    messages.success(request, 'Group updated successfully!')
+                    
                 return redirect('group_detail', group_id=group.id)
     else:
         form = GroupForm(instance=group)
@@ -117,6 +289,7 @@ def group_delete(request, group_id):
 @login_required
 def group_detail(request, group_id):
     group = get_object_or_404(groups, pk=group_id, users=request.user, deleted=0)
+    # Filter only non-deleted expenses
     group_expenses = GroupExpense.objects.filter(group=group, deleted=0).order_by('-created_at')
     
     # Identify currencies used in this group
@@ -133,13 +306,28 @@ def group_detail(request, group_id):
         net_balances = {}
         for member in members:
             # Filter by currency
-            paid = ExpensePayment.objects.filter(expense__group=group, expense__currency=currency, user=member, expense__deleted=0).aggregate(Sum('amount'))['amount__sum'] or 0
-            owed = ExpenseSplit.objects.filter(expense__group=group, expense__currency=currency, user=member, expense__deleted=0).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
-            net_balances[member] = float(paid - owed)
+             # Add deleted=0 filter
+            paid = ExpensePayment.objects.filter(
+                expense__group=group, 
+                expense__currency=currency, 
+                user=member, 
+                expense__deleted=0,
+                deleted=0
+            ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+            
+            owed = ExpenseSplit.objects.filter(
+                expense__group=group, 
+                expense__currency=currency, 
+                user=member, 
+                expense__deleted=0,
+                deleted=0
+            ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or Decimal('0.00')
+            
+            net_balances[member] = paid - owed
         
         # Check Ledger Integrity
         total_system_balance = sum(net_balances.values())
-        ledger_error = abs(total_system_balance) > 0.05
+        ledger_error = abs(total_system_balance) > Decimal('0.05')
         
         debts = []
         if not ledger_error:
@@ -147,9 +335,9 @@ def group_detail(request, group_id):
             debtors = []
             creditors = []
             for member, balance in net_balances.items():
-                if balance < -0.01:
+                if balance < Decimal('-0.01'):
                     debtors.append({'user': member, 'amount': abs(balance)})
-                elif balance > 0.01:
+                elif balance > Decimal('0.01'):
                     creditors.append({'user': member, 'amount': balance})
             
             debtors.sort(key=lambda x: x['amount'], reverse=True)
@@ -172,8 +360,8 @@ def group_detail(request, group_id):
                 debtor['amount'] -= amount
                 creditor['amount'] -= amount
                 
-                if debtor['amount'] < 0.01: i += 1
-                if creditor['amount'] < 0.01: j += 1
+                if debtor['amount'] < Decimal('0.01'): i += 1
+                if creditor['amount'] < Decimal('0.01'): j += 1
         
         balances_by_currency[currency] = {
             'net_balances': net_balances,
@@ -202,25 +390,25 @@ def add_group_expense(request, group_id):
         if form.is_valid():
             # Validate BEFORE saving
             split_type = form.cleaned_data['split_type']
-            amount = form.cleaned_data['amount']
+            amount = form.cleaned_data['amount'] # This is already Decimal
             
             involved_members = members
             split_data = {} # Store captured split data to avoid reading POST twice
 
             if split_type == 'EXACT':
-                total_split = 0
+                total_split = Decimal('0.00')
                 for member in involved_members:
                     amount_str = request.POST.get(f'split_amount_{member.id}')
                     if amount_str:
                         try:
-                            val = float(amount_str)
+                            val = Decimal(amount_str)
                             total_split += val
                             split_data[member.id] = val
-                        except ValueError:
+                        except Exception:
                             pass # Ignored or handled as 0
                 
                 # Check tolerance
-                if abs(total_split - float(amount)) > 0.05:
+                if abs(total_split - amount) > Decimal('0.05'):
                     messages.error(request, f"Error: Total split ({total_split}) must equal expense amount ({amount}).")
                     return render(request, 'add_group_expense.html', {
                         'group': group,
@@ -237,18 +425,18 @@ def add_group_expense(request, group_id):
             # First, check validation for payments if MULTIPLE
             payment_data = {}
             if payment_type == 'MULTIPLE':
-                total_paid = 0
+                total_paid = Decimal('0.00')
                 for member in members:
                     pay_amt = request.POST.get(f'payment_amount_{member.id}')
                     if pay_amt:
                         try:
-                            val = float(pay_amt)
+                            val = Decimal(pay_amt)
                             total_paid += val
                             payment_data[member.id] = val
-                        except ValueError:
+                        except Exception:
                             pass
                 
-                if abs(total_paid - float(amount)) > 0.05:
+                if abs(total_paid - amount) > Decimal('0.05'):
                      messages.error(request, f"Error: Total payments ({total_paid}) must equal expense amount ({amount}).")
                      # Delete the expense we just created? Or use atomic transaction?
                      # Since we did form.save(commit=False), it's not in DB yet? 
@@ -286,7 +474,7 @@ def add_group_expense(request, group_id):
 
             # --- SPLIT LOGIC ---
             if split_type == 'EQUAL':
-                split_amount = amount / involved_members.count()
+                split_amount = amount / Decimal(involved_members.count())
                 for member in involved_members:
                     ExpenseSplit.objects.create(
                         expense=expense,
@@ -303,6 +491,17 @@ def add_group_expense(request, group_id):
                         )
 
             messages.success(request, 'Expense added successfully!')
+            
+            # Notify group members
+            for member in group.users.all():
+                if member != request.user:
+                    Notification.objects.create(
+                        user=member,
+                        message=f"New expense '{expense.description}' added in '{group.name}' by {request.user.username}.",
+                        notification_type='EXPENSE_ADD',
+                        related_link=f"/groups/{group.id}/"
+                    )
+
             return redirect('group_detail', group_id=group.id)
     else:
         # Pre-select current user as default
@@ -336,18 +535,18 @@ def edit_group_expense(request, expense_id):
             split_data = {}
 
             if split_type == 'EXACT':
-                total_split = 0
+                total_split = Decimal('0.00')
                 for member in involved_members:
                     amount_str = request.POST.get(f'split_amount_{member.id}')
                     if amount_str:
                         try:
-                            val = float(amount_str)
+                            val = Decimal(amount_str)
                             total_split += val
                             split_data[member.id] = val
-                        except ValueError:
+                        except Exception:
                             pass
                 
-                if abs(total_split - float(amount)) > 0.05:
+                if abs(total_split - amount) > Decimal('0.05'):
                     messages.error(request, f"Error: Total split ({total_split}) must equal expense amount ({amount}).")
                     return render(request, 'add_group_expense.html', {
                         'group': group,
@@ -361,18 +560,18 @@ def edit_group_expense(request, expense_id):
             payment_type = request.POST.get('payment_type', 'SINGLE')
             payment_data = {}
             if payment_type == 'MULTIPLE':
-                total_paid = 0
+                total_paid = Decimal('0.00')
                 for member in members:
                     pay_amt = request.POST.get(f'payment_amount_{member.id}')
                     if pay_amt:
                         try:
-                            val = float(pay_amt)
+                            val = Decimal(pay_amt)
                             total_paid += val
                             payment_data[member.id] = val
-                        except ValueError:
+                        except Exception:
                             pass
                 
-                if abs(total_paid - float(amount)) > 0.05:
+                if abs(total_paid - amount) > Decimal('0.05'):
                      messages.error(request, f"Error: Total payments ({total_paid}) must equal expense amount ({amount}).")
                      # Pass context back
                      return render(request, 'add_group_expense.html', {
@@ -386,8 +585,9 @@ def edit_group_expense(request, expense_id):
             # Save Expense
             expense = form.save()
 
-            # Update Payments (Delete Old, Create New)
-            ExpensePayment.objects.filter(expense=expense).delete()
+            # Update Payments (SOFT DELETE Old, Create New)
+            # Use update(deleted=True) instead of delete()
+            ExpensePayment.objects.filter(expense=expense).update(deleted=True)
             
             if payment_type == 'MULTIPLE':
                  for member in members:
@@ -405,13 +605,13 @@ def edit_group_expense(request, expense_id):
                     amount=amount
                 )
 
-            # Re-Calculate Splits
+            # Re-Calculate Splits (SOFT DELETE Old)
             # Crude approach: Delete all existing splits and recreate
             # In a better app, we might try to update existing ones, but recreation is safer for consistency
-            ExpenseSplit.objects.filter(expense=expense).delete()
+            ExpenseSplit.objects.filter(expense=expense).update(deleted=True)
 
             if split_type == 'EQUAL':
-                split_amount = amount / involved_members.count()
+                split_amount = amount / Decimal(involved_members.count())
                 for member in involved_members:
                     ExpenseSplit.objects.create(
                         expense=expense,
@@ -461,3 +661,147 @@ def delete_group_expense(request, expense_id):
         return redirect('group_detail', group_id=group.id)
 
     return render(request, 'group_expense_confirm_delete.html', {'expense': expense})
+
+@login_required
+def leave_group(request, group_id):
+    group = get_object_or_404(groups, pk=group_id, users=request.user, deleted=0)
+    
+    # Check if user has any outstanding balance in ANY currency
+    if get_user_balance_in_group(request.user, group):
+        messages.error(request, "Cannot leave group because you have unsettled debts. Please settle up first.")
+        return redirect('group_detail', group_id=group.id)
+
+    # Remove user from group
+    group.users.remove(request.user)
+    
+    # Notify other members
+    for member in group.users.all():
+         Notification.objects.create(
+            user=member,
+            message=f"{request.user.username} has left the group '{group.name}'.",
+            notification_type='SYSTEM', 
+            related_link=f"/groups/{group.id}/"
+        )
+        
+    messages.success(request, f"You have left '{group.name}'.")
+    return redirect('groups')
+
+@login_required
+def settle_up(request, group_id, user_id, currency):
+    group = get_object_or_404(groups, pk=group_id, users=request.user, deleted=0)
+    target_user = get_object_or_404(User, pk=user_id)
+    
+    if target_user not in group.users.all():
+        messages.error(request, "Target user is not in this group.")
+        return redirect('group_detail', group_id=group.id)
+
+    # 1. Calculate exactly how much is owed to this user in this currency
+    # We need to reuse the calculation logic or replicate it carefully.
+    # Reuse filter logic from group_detail
+    
+    paid = ExpensePayment.objects.filter(
+        expense__group=group, 
+        expense__currency=currency, 
+        user=request.user, 
+        expense__deleted=0,
+        deleted=0
+    ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+    
+    owed = ExpenseSplit.objects.filter(
+        expense__group=group, 
+        expense__currency=currency, 
+        user=request.user, 
+        expense__deleted=0,
+        deleted=0
+    ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or Decimal('0.00')
+    
+    net_self = paid - owed # If negative, I owe money.
+    
+    # But wait, this is MY total balance. I need to know how much I owe specifically to target_user?
+    # The current system calculates "Who Owes Whom" based on minimizing transactions locally in `group_detail`.
+    # It does NOT track bilateral debts persistently.
+    # So "Settle Up" with a specific user is actually "Pay off my debt to the system, and giving it to User X".
+    # In a centralized debt simplification (which we implemented in group_detail), 
+    # if I show up as "Owe User B $50", it means I should pay User B $50.
+    
+    # However, since we don't store bilateral debt, we can't easily verify "I owe B $50" from the DB alone 
+    # without re-running the simplification algorithm.
+    # For now, let's assume the UI button is only shown if the Simplification Alg says I owe B.
+    # But for safety, we should re-run the algo here? Or just trust the request amount?
+    # Trusting request amount is dangerous.
+    # Let's re-run the algo simply to find the matched debt.
+    
+    # --- Re-run Simplification for this currency ---
+    members = group.users.all()
+    net_balances = {}
+    for member in members:
+        p = ExpensePayment.objects.filter(expense__group=group, expense__currency=currency, user=member, expense__deleted=0, deleted=0).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+        o = ExpenseSplit.objects.filter(expense__group=group, expense__currency=currency, user=member, expense__deleted=0, deleted=0).aggregate(Sum('amount_owed'))['amount_owed__sum'] or Decimal('0.00')
+        net_balances[member] = p - o
+
+    debtors = []
+    creditors = []
+    for member, balance in net_balances.items():
+        if balance < Decimal('-0.01'): debtors.append({'user': member, 'amount': abs(balance)})
+        elif balance > Decimal('0.01'): creditors.append({'user': member, 'amount': balance})
+    
+    debtors.sort(key=lambda x: x['amount'], reverse=True)
+    creditors.sort(key=lambda x: x['amount'], reverse=True)
+
+    amount_to_pay = Decimal('0.00')
+    
+    # Run matching
+    i = 0; j = 0
+    while i < len(debtors) and j < len(creditors):
+        debtor = debtors[i]
+        creditor = creditors[j]
+        amount = min(debtor['amount'], creditor['amount'])
+        
+        # Check if this match is ME -> Target
+        if debtor['user'] == request.user and creditor['user'] == target_user:
+            amount_to_pay = amount
+            break # Found the match. 
+            # Note: In complex scenarios, I might owe multiple people. 
+            # This simplistic greedy algo is deterministic, so if it showed up in UI, it should show up here.
+        
+        debtor['amount'] -= amount
+        creditor['amount'] -= amount
+        if debtor['amount'] < Decimal('0.01'): i += 1
+        if creditor['amount'] < Decimal('0.01'): j += 1
+    
+    if amount_to_pay < Decimal('0.01'):
+         messages.error(request, f"You do not seem to owe {target_user.username} anything in {currency}.")
+         return redirect('group_detail', group_id=group.id)
+
+    # 2. Create Settlement Expense
+    expense = GroupExpense.objects.create(
+        group=group,
+        description=f"Settlement to {target_user.username}",
+        amount=amount_to_pay,
+        currency=currency,
+        paid_by=request.user,
+        # We can mark it as a special type if we had one, but Description is fine for now.
+    )
+    
+    # 3. Create Payment (I PAID)
+    # Wait, "Settlement" means I paid money to Target.
+    # So in the system: I Paid X, Target Gets X (or Split is X?)
+    # If I record an expense "Settlement":
+    #   Determined Payer: ME (Amount X) -> Adds +X to my balance
+    #   Split: TARGET (Amount X) -> Subtracts -X from target's balance
+    # Result: My Net Balance (+X), Target Net Balance (-X).
+    # Since I was (-X) and Target was (+X), this neutralizes both! Correct.
+    
+    ExpensePayment.objects.create(expense=expense, user=request.user, amount=amount_to_pay)
+    ExpenseSplit.objects.create(expense=expense, user=target_user, amount_owed=amount_to_pay)
+    
+    # 4. Notify Target
+    Notification.objects.create(
+        user=target_user,
+        message=f"{request.user.username} settled up {currency} {amount_to_pay} with you.",
+        notification_type='SETTLEMENT',
+        related_link=f"/groups/{group.id}/"
+    )
+
+    messages.success(request, f"Settled up {currency} {amount_to_pay} with {target_user.username}!")
+    return redirect('group_detail', group_id=group.id)
