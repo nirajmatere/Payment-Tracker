@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 class Notification(models.Model):
     NOTIFICATION_TYPES = (
         ('GROUP_ADD', 'Added to Group'),
+        ('INVITATION', 'Group Invitation'),
         ('EXPENSE_ADD', 'New Expense Added'),
         ('SETTLEMENT', 'Debt Settled'),
         ('SYSTEM', 'System Notification'),
@@ -12,6 +13,7 @@ class Notification(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     message = models.CharField(max_length=255)
     notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES, default='SYSTEM')
+    invitation = models.ForeignKey('groups.GroupInvitation', on_delete=models.CASCADE, null=True, blank=True)
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     related_link = models.CharField(max_length=255, blank=True, null=True, help_text="Link to the related object (e.g. /groups/1)")

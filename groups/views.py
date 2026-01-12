@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.utils import timezone
-from .models import groups, GroupExpense, ExpenseSplit, ExpensePayment
+from .models import groups, GroupExpense, ExpenseSplit, ExpensePayment, GroupInvitation
 from .forms import GroupExpenseForm, GroupForm
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
@@ -118,26 +118,81 @@ def group_add(request):
     if request.method == 'POST':
         form = GroupForm(request.POST, request.FILES)
         if form.is_valid():
-            new_group = form.save()
-            # Ensure the creator is part of the group
+            new_group = form.save(commit=False)
+            new_group.save() # Save main object to get ID
+            
+            # Creator is always added directly
             new_group.users.add(request.user)
             
-            # Notify members
-            for user in form.cleaned_data['users']:
+            # For other users, create invitations
+            selected_users = form.cleaned_data['users']
+            for user in selected_users:
                 if user != request.user:
+                    # Create Invitation
+                    invitation = GroupInvitation.objects.create(
+                        group=new_group,
+                        sender=request.user,
+                        receiver=user,
+                        status='PENDING'
+                    )
+                    
+                    # Notify
                     Notification.objects.create(
                         user=user,
-                        message=f"You have been added to the group '{new_group.name}' by {request.user.username}.",
-                        notification_type='GROUP_ADD',
-                        related_link=f"/groups/{new_group.id}/"
+                        message=f"{request.user.username} has invited you to join the group '{new_group.name}'.",
+                        notification_type='INVITATION',
+                        related_link=f"/groups/invitations/",
+                        invitation=invitation
                     )
 
-            messages.success(request, 'Group created successfully!')
+            messages.success(request, 'Group created! Invitations sent.')
             return redirect('groups')
     else:
         form = GroupForm()
     
     return render(request, 'group_form.html', {'form': form})
+
+@login_required
+def accept_invitation(request, invitation_id):
+    invitation = get_object_or_404(GroupInvitation, pk=invitation_id, receiver=request.user, status='PENDING')
+    
+    # Add user to group
+    group = invitation.group
+    group.users.add(request.user)
+    
+    # Update Status
+    invitation.status = 'ACCEPTED'
+    invitation.save()
+    
+    # Notify Sender
+    Notification.objects.create(
+        user=invitation.sender,
+        message=f"{request.user.username} accepted your invitation to '{group.name}'.",
+        notification_type='SYSTEM',
+        related_link=f"/groups/{group.id}/"
+    )
+    
+    # Find original notification and mark as read? Optional.
+    
+    messages.success(request, f"You have joined '{group.name}'.")
+    return redirect('groups')
+
+@login_required
+def decline_invitation(request, invitation_id):
+    invitation = get_object_or_404(GroupInvitation, pk=invitation_id, receiver=request.user, status='PENDING')
+    
+    invitation.status = 'DECLINED'
+    invitation.save()
+    
+    # Notify Sender
+    Notification.objects.create(
+        user=invitation.sender,
+        message=f"{request.user.username} declined your invitation to '{invitation.group.name}'.",
+        notification_type='SYSTEM',
+    )
+    
+    messages.info(request, "Invitation declined.")
+    return redirect('notifications')
 
 @login_required
 def group_edit(request, group_id):
@@ -158,20 +213,53 @@ def group_edit(request, group_id):
                     error_found = True
             
             if not error_found:
-                form.save()
+                # Save non-M2M fields (name, image)
+                group = form.save(commit=False)
+                group.save()
                 
-                # Notify NEW members
+                # Handle M2M: users
+                # We want to Keep: Original - Removed
+                # We want to Invite: Added
+                
+                # 1. Update Group Users (Remove those who were unchecked)
+                # But wait, form.save_m2m() (if we called it) would set it to 'new_members'.
+                # We are NOT calling form.save_m2m(). We will manually set users.
+                
+                final_direct_members = list(original_members - removed_members)
+                # Ensure creator/editor is kept? Logic implies they should be in 'new_members' if not unchecked.
+                # If user unchecked themselves?
+                
+                group.users.set(final_direct_members)
+                
+                # 2. Invite New Members
                 added_members = new_members - original_members
                 for member in added_members:
                     if member != request.user:
-                         Notification.objects.create(
-                            user=member,
-                            message=f"You have been added to the group '{group.name}' by {request.user.username}.",
-                            notification_type='GROUP_ADD',
-                            related_link=f"/groups/{group.id}/"
-                        )
-
-                messages.success(request, 'Group updated successfully!')
+                        # Check if invite already exists?
+                        existing_invite = GroupInvitation.objects.filter(group=group, receiver=member, status='PENDING').exists()
+                        if not existing_invite:
+                             invitation = GroupInvitation.objects.create(
+                                group=group,
+                                sender=request.user,
+                                receiver=member,
+                                status='PENDING'
+                            )
+                            
+                             Notification.objects.create(
+                                user=member,
+                                message=f"{request.user.username} has invited you to join the group '{group.name}'.",
+                                notification_type='INVITATION',
+                                related_link=f"/groups/invitations/",
+                                invitation=invitation
+                            )
+                
+                # Re-add success message for removals?
+                # "Group updated successfully!" cover it.
+                if added_members:
+                    messages.success(request, f"Group updated! Invitations sent to {len(added_members)} new users.")
+                else:
+                    messages.success(request, 'Group updated successfully!')
+                    
                 return redirect('group_detail', group_id=group.id)
     else:
         form = GroupForm(instance=group)

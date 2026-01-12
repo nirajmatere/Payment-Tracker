@@ -45,7 +45,8 @@ class NotificationTests(TestCase):
         # check if User2 got a notification
         notifications = Notification.objects.filter(user=self.user2)
         self.assertEqual(notifications.count(), 1)
-        self.assertIn("added to the group", notifications.first().message)
+        self.assertIn("invited you to join", notifications.first().message)
+        self.assertEqual(notifications.first().notification_type, 'INVITATION')
         
         # User1 (creator) should NOT get a notification for adding themselves
         notifications_creator = Notification.objects.filter(user=self.user1)
