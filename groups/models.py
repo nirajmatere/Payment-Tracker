@@ -37,6 +37,7 @@ class ExpensePayment(models.Model):
     expense = models.ForeignKey(GroupExpense, on_delete=models.CASCADE, related_name='payments')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='expense_payments')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    deleted = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.user.username} paid {self.amount} for {self.expense.description}"
@@ -46,6 +47,7 @@ class ExpenseSplit(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='expense_splits')
     amount_owed = models.DecimalField(max_digits=10, decimal_places=2)
     paid = models.BooleanField(default=False)
+    deleted = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.user.username} owes {self.amount_owed} for {self.expense.description}"
