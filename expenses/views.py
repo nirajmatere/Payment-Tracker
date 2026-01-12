@@ -289,54 +289,47 @@ def payment_method_delete(request, payment_method_id):
         return redirect('payment_method_list')
     return render(request, 'payment_method_confirm_delete.html', {'payment_method': payment_method})
 
+from django.db.models import Sum
+
 @login_required
 def spending(request):
     # Get the start and end date from the request parameters
     start_date = request.GET.get('start_date', '')
     end_date = request.GET.get('end_date', '')
 
-    # Initialize variables
-    total_expense = 0
-    total_expense_category_wise = 0
-    total_expense_payment_method_wise = 0
-    total_expense_category = {}
-    total_expense_payment_method = {}
-
     # Filter expenses by user and optional date range
     expenses = Expenses.objects.filter(user=request.user, deleted=0)
 
     # If start_date is provided, filter the expenses from that date
     if start_date:
-        start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        expenses = expenses.filter(created_at__gte=start_date)
+        start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+        expenses = expenses.filter(created_at__gte=start_date_obj)
     
     # If end_date is provided, filter the expenses up to that date
     if end_date:
-        end_date = datetime.strptime(end_date, '%Y-%m-%d')
-        expenses = expenses.filter(created_at__lte=end_date)
+        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+        expenses = expenses.filter(created_at__lte=end_date_obj)
 
-    # Calculate the total expenses based on category and payment method
-    for expense in expenses:
-        total_expense += expense.price
-        if expense.category is None:
-            total_expense_category['Category Not Selected'] = expense.price
-            total_expense_category_wise += expense.price
-        elif expense.category.name in total_expense_category:
-            total_expense_category[expense.category.name] += expense.price
-            total_expense_category_wise += expense.price
-        else:
-            total_expense_category[expense.category.name] = expense.price
-            total_expense_category_wise += expense.price
+    # Calculate total expense
+    total_expense = expenses.aggregate(Sum('price'))['price__sum'] or 0
 
-        if expense.payment_method is None:
-            total_expense_payment_method['Payment Method Not Selected'] = expense.price
-            total_expense_payment_method_wise += expense.price
-        elif expense.payment_method.name in total_expense_payment_method:
-            total_expense_payment_method[expense.payment_method.name] += expense.price
-            total_expense_payment_method_wise += expense.price
-        else:
-            total_expense_payment_method[expense.payment_method.name] = expense.price
-            total_expense_payment_method_wise += expense.price
+    # Category-wise Aggregation
+    category_data = expenses.values('category__name').annotate(total=Sum('price'))
+    total_expense_category = {
+        (item['category__name'] if item['category__name'] else 'Category Not Selected'): item['total'] 
+        for item in category_data
+    }
+    
+    # Payment Method-wise Aggregation
+    payment_method_data = expenses.values('payment_method__name').annotate(total=Sum('price'))
+    total_expense_payment_method = {
+        (item['payment_method__name'] if item['payment_method__name'] else 'Payment Method Not Selected'): item['total'] 
+        for item in payment_method_data
+    }
+
+    # These totals are mathematically identical to total_expense logic-wise
+    total_expense_category_wise = total_expense
+    total_expense_payment_method_wise = total_expense
 
     # Return the response with filtered expenses and date range
     return render(

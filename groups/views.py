@@ -11,6 +11,8 @@ from django.db.models import Sum
 
 # Create your views here.
 
+from decimal import Decimal
+
 # Helper function to check member debt
 def get_user_balance_in_group(user, group):
     """
@@ -25,7 +27,7 @@ def get_user_balance_in_group(user, group):
             user=user, 
             expense__deleted=0,
             deleted=0
-        ).aggregate(Sum('amount'))['amount__sum'] or 0
+        ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
         
         owed = ExpenseSplit.objects.filter(
             expense__group=group, 
@@ -33,9 +35,9 @@ def get_user_balance_in_group(user, group):
             user=user, 
             expense__deleted=0,
             deleted=0
-        ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
+        ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or Decimal('0.00')
         
-        if abs(paid - owed) > 0.01:
+        if abs(paid - owed) > Decimal('0.01'):
             return True # User has outstanding balance
     return False
 
@@ -45,38 +47,67 @@ def group_list(request):
     groups_data = []
     user_groups = groups.objects.filter(users=user, deleted=0)
     
+    # --- Bulk Fetch Balances to fix N+1 Query Issue ---
+    
+    # 1. Fetch total paid by user per (group, currency)
+    payments = ExpensePayment.objects.filter(
+        expense__group__in=user_groups,
+        user=user,
+        expense__deleted=0,
+        deleted=0
+    ).values('expense__group', 'expense__currency').annotate(total_paid=Sum('amount'))
+    
+    # Map: (group_id, currency) -> amount
+    payment_map = {}
+    for p in payments:
+        k = (p['expense__group'], p['expense__currency'])
+        payment_map[k] = p['total_paid']
+
+    # 2. Fetch total owed by user per (group, currency)
+    splits = ExpenseSplit.objects.filter(
+        expense__group__in=user_groups,
+        user=user,
+        expense__deleted=0,
+        deleted=0
+    ).values('expense__group', 'expense__currency').annotate(total_owed=Sum('amount_owed'))
+    
+    # Map: (group_id, currency) -> amount
+    split_map = {}
+    for s in splits:
+        k = (s['expense__group'], s['expense__currency'])
+        split_map[k] = s['total_owed']
+        
+    # 3. Identify all unique currencies per group to display
+    # This is a bit tricky since we need currencies even if balance is 0?
+    # Usually we only care about non-zero balances or active currencies.
+    # Let's fetch all currencies used in these groups.
+    group_currencies = GroupExpense.objects.filter(
+        group__in=user_groups, 
+        deleted=0
+    ).values_list('group', 'currency').distinct()
+    
+    currency_map = {} # group_id -> set(currencies)
+    for g_id, curr in group_currencies:
+        if g_id not in currency_map: currency_map[g_id] = set()
+        currency_map[g_id].add(curr)
+
     for group in user_groups:
-        # Calculate net balance for this user in this group PER CURRENCY
-        # Identify currencies in this group
-        currencies = GroupExpense.objects.filter(group=group, deleted=0).values_list('currency', flat=True).distinct()
-        if not currencies:
-             currencies = ['USD']
-            
         balances = []
+        # Get currencies for this group, default to USD if none
+        currencies = currency_map.get(group.id, {'USD'})
+        if not currencies: currencies = {'USD'} # Fallback if set is empty
+        
         for currency in currencies:
-            paid = ExpensePayment.objects.filter(
-                expense__group=group, 
-                expense__currency=currency, 
-                user=user, 
-                expense__deleted=0,
-                deleted=0
-            ).aggregate(Sum('amount'))['amount__sum'] or 0
+            paid = payment_map.get((group.id, currency), Decimal('0.00'))
+            owed = split_map.get((group.id, currency), Decimal('0.00'))
             
-            owed = ExpenseSplit.objects.filter(
-                expense__group=group, 
-                expense__currency=currency, 
-                user=user, 
-                expense__deleted=0,
-                deleted=0
-            ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
-            
-            net = float(paid - owed)
-            if abs(net) > 0.01:
+            net = paid - owed
+            if abs(net) > Decimal('0.01'):
                 balances.append({'currency': currency, 'amount': net})
         
         groups_data.append({
             'group': group,
-            'balances': balances # List of {currency, amount}
+            'balances': balances 
         })
         
     return render(request, 'group_list.html', {'groups_data': groups_data})
@@ -170,7 +201,7 @@ def group_detail(request, group_id):
                 user=member, 
                 expense__deleted=0,
                 deleted=0
-            ).aggregate(Sum('amount'))['amount__sum'] or 0
+            ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
             
             owed = ExpenseSplit.objects.filter(
                 expense__group=group, 
@@ -178,13 +209,13 @@ def group_detail(request, group_id):
                 user=member, 
                 expense__deleted=0,
                 deleted=0
-            ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
+            ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or Decimal('0.00')
             
-            net_balances[member] = float(paid - owed)
+            net_balances[member] = paid - owed
         
         # Check Ledger Integrity
         total_system_balance = sum(net_balances.values())
-        ledger_error = abs(total_system_balance) > 0.05
+        ledger_error = abs(total_system_balance) > Decimal('0.05')
         
         debts = []
         if not ledger_error:
@@ -192,9 +223,9 @@ def group_detail(request, group_id):
             debtors = []
             creditors = []
             for member, balance in net_balances.items():
-                if balance < -0.01:
+                if balance < Decimal('-0.01'):
                     debtors.append({'user': member, 'amount': abs(balance)})
-                elif balance > 0.01:
+                elif balance > Decimal('0.01'):
                     creditors.append({'user': member, 'amount': balance})
             
             debtors.sort(key=lambda x: x['amount'], reverse=True)
@@ -217,8 +248,8 @@ def group_detail(request, group_id):
                 debtor['amount'] -= amount
                 creditor['amount'] -= amount
                 
-                if debtor['amount'] < 0.01: i += 1
-                if creditor['amount'] < 0.01: j += 1
+                if debtor['amount'] < Decimal('0.01'): i += 1
+                if creditor['amount'] < Decimal('0.01'): j += 1
         
         balances_by_currency[currency] = {
             'net_balances': net_balances,
@@ -247,25 +278,25 @@ def add_group_expense(request, group_id):
         if form.is_valid():
             # Validate BEFORE saving
             split_type = form.cleaned_data['split_type']
-            amount = form.cleaned_data['amount']
+            amount = form.cleaned_data['amount'] # This is already Decimal
             
             involved_members = members
             split_data = {} # Store captured split data to avoid reading POST twice
 
             if split_type == 'EXACT':
-                total_split = 0
+                total_split = Decimal('0.00')
                 for member in involved_members:
                     amount_str = request.POST.get(f'split_amount_{member.id}')
                     if amount_str:
                         try:
-                            val = float(amount_str)
+                            val = Decimal(amount_str)
                             total_split += val
                             split_data[member.id] = val
-                        except ValueError:
+                        except Exception:
                             pass # Ignored or handled as 0
                 
                 # Check tolerance
-                if abs(total_split - float(amount)) > 0.05:
+                if abs(total_split - amount) > Decimal('0.05'):
                     messages.error(request, f"Error: Total split ({total_split}) must equal expense amount ({amount}).")
                     return render(request, 'add_group_expense.html', {
                         'group': group,
@@ -282,18 +313,18 @@ def add_group_expense(request, group_id):
             # First, check validation for payments if MULTIPLE
             payment_data = {}
             if payment_type == 'MULTIPLE':
-                total_paid = 0
+                total_paid = Decimal('0.00')
                 for member in members:
                     pay_amt = request.POST.get(f'payment_amount_{member.id}')
                     if pay_amt:
                         try:
-                            val = float(pay_amt)
+                            val = Decimal(pay_amt)
                             total_paid += val
                             payment_data[member.id] = val
-                        except ValueError:
+                        except Exception:
                             pass
                 
-                if abs(total_paid - float(amount)) > 0.05:
+                if abs(total_paid - amount) > Decimal('0.05'):
                      messages.error(request, f"Error: Total payments ({total_paid}) must equal expense amount ({amount}).")
                      # Delete the expense we just created? Or use atomic transaction?
                      # Since we did form.save(commit=False), it's not in DB yet? 
@@ -331,7 +362,7 @@ def add_group_expense(request, group_id):
 
             # --- SPLIT LOGIC ---
             if split_type == 'EQUAL':
-                split_amount = amount / involved_members.count()
+                split_amount = amount / Decimal(involved_members.count())
                 for member in involved_members:
                     ExpenseSplit.objects.create(
                         expense=expense,
@@ -381,18 +412,18 @@ def edit_group_expense(request, expense_id):
             split_data = {}
 
             if split_type == 'EXACT':
-                total_split = 0
+                total_split = Decimal('0.00')
                 for member in involved_members:
                     amount_str = request.POST.get(f'split_amount_{member.id}')
                     if amount_str:
                         try:
-                            val = float(amount_str)
+                            val = Decimal(amount_str)
                             total_split += val
                             split_data[member.id] = val
-                        except ValueError:
+                        except Exception:
                             pass
                 
-                if abs(total_split - float(amount)) > 0.05:
+                if abs(total_split - amount) > Decimal('0.05'):
                     messages.error(request, f"Error: Total split ({total_split}) must equal expense amount ({amount}).")
                     return render(request, 'add_group_expense.html', {
                         'group': group,
@@ -406,18 +437,18 @@ def edit_group_expense(request, expense_id):
             payment_type = request.POST.get('payment_type', 'SINGLE')
             payment_data = {}
             if payment_type == 'MULTIPLE':
-                total_paid = 0
+                total_paid = Decimal('0.00')
                 for member in members:
                     pay_amt = request.POST.get(f'payment_amount_{member.id}')
                     if pay_amt:
                         try:
-                            val = float(pay_amt)
+                            val = Decimal(pay_amt)
                             total_paid += val
                             payment_data[member.id] = val
-                        except ValueError:
+                        except Exception:
                             pass
                 
-                if abs(total_paid - float(amount)) > 0.05:
+                if abs(total_paid - amount) > Decimal('0.05'):
                      messages.error(request, f"Error: Total payments ({total_paid}) must equal expense amount ({amount}).")
                      # Pass context back
                      return render(request, 'add_group_expense.html', {
@@ -457,7 +488,7 @@ def edit_group_expense(request, expense_id):
             ExpenseSplit.objects.filter(expense=expense).update(deleted=True)
 
             if split_type == 'EQUAL':
-                split_amount = amount / involved_members.count()
+                split_amount = amount / Decimal(involved_members.count())
                 for member in involved_members:
                     ExpenseSplit.objects.create(
                         expense=expense,
