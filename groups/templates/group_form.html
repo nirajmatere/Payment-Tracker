@@ -1,11 +1,11 @@
 {% extends "layout.html" %}
 
 {% block title %}
-Add Group
+    {% if group %}Edit Group{% else %}Add Group{% endif %}
 {% endblock %}
 
 {% block content %}
-<h2 class="text-center mt-4">Create New Group</h2>
+<h2 class="text-center mt-4">{% if group %}Edit Group{% else %}Create New Group{% endif %}</h2>
 <div class="container mt-5">
     <div class="card shadow-sm p-4">
         <form method="POST" enctype="multipart/form-data" class="form">
@@ -17,6 +17,11 @@ Add Group
             
             <div class="mb-3">
                 <label for="id_group_image" class="form-label">Group Image</label>
+                {% if group.group_image %}
+                    <div class="mb-2">
+                        <img src="{{ group.group_image.url }}" alt="{{ group.name }}" style="height: 100px; width: 100px; object-fit: cover; border-radius: 5px;">
+                    </div>
+                {% endif %}
                 {{ form.group_image }}
             </div>
             
@@ -24,12 +29,12 @@ Add Group
                 <label for="id_users" class="form-label">Select Users</label>
                     <select id="id_users" name="users" class="form-select" multiple>
                         {% for user in form.users.field.queryset %}
-                            <option value="{{ user.id }}">{{ user.username }}</option>
+                             <option value="{{ user.id }}" {% if user in form.initial.users or user.id in form.initial.users %}selected{% endif %}>{{ user.username }}</option>
                         {% endfor %}
                     </select>
             </div>
 
-            <button type="submit" class="btn btn-primary w-100">Add Group</button>
+            <button type="submit" class="btn btn-primary w-100">{% if group %}Update Group{% else %}Add Group{% endif %}</button>
         </form>
     </div>
 </div>

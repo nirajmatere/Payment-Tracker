@@ -5,8 +5,10 @@ Groups
 {% endblock %}
 
 {% block content %}
-    <h2>Groups</h2>
-    {% comment %} <a href="{% url 'group_add' %}" class="btn btn-primary">Add Group</a> {% endcomment %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Groups</h2>
+        <a href="{% url 'group_add' %}" class="btn btn-primary">Add Group</a>
+    </div>
     <div class="row row-cols-1 row-cols-md-4 g-4 text-decoration-none">
         {% for item in groups_data %}
             <div class="col">
