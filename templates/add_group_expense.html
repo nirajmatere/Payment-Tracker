@@ -1,0 +1,215 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>{% if editing %}Update{% else %}Add{% endif %} Expense to {{ group.name }}</h2>
+    <div class="card p-4">
+        <form method="post">
+            {% csrf_token %}
+            <div class="mb-3">
+                <label for="id_description" class="form-label">Description</label>
+                {{ form.description }}
+            </div>
+            <div class="mb-3">
+                <label for="id_amount" class="form-label">Amount</label>
+                <div class="input-group">
+                    {{ form.currency }}
+                    {{ form.amount }}
+                </div>
+            </div>
+            <!-- Payment Section -->
+            <div class="mb-3">
+                <label class="form-label">Paid By</label>
+                <div class="btn-group w-100 mb-2" role="group" aria-label="Payment Type">
+                    <input type="radio" class="btn-check" name="payment_type" id="payment_single" value="SINGLE" checked>
+                    <label class="btn btn-outline-primary" for="payment_single">Single Payer</label>
+                    <input type="radio" class="btn-check" name="payment_type" id="payment_multiple" value="MULTIPLE">
+                    <label class="btn btn-outline-primary" for="payment_multiple">Multiple Payers</label>
+                </div>
+            </div>
+
+            <!-- Single Payer Input -->
+            <div id="single-payer-input" class="mb-3">
+                {{ form.paid_by }}
+            </div>
+
+            <!-- Multiple Payer Input -->
+            <div id="multiple-payer-input" class="mb-3" style="display: none;">
+                <div class="card card-body bg-light">
+                    <h6>Enter amount paid by each person:</h6>
+                    {% for member in members %}
+                    <div class="input-group mb-2">
+                        <span class="input-group-text" style="width: 120px;">{{ member.username }}</span>
+                        <span class="input-group-text">$</span>
+                        <input type="number" step="0.01" name="payment_amount_{{ member.id }}" class="form-control" placeholder="0.00">
+                    </div>
+                    {% endfor %}
+                    <div class="mt-2 text-end">
+                         <strong>Total Paid: $<span id="total-paid">0.00</span></strong>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <label class="form-label">Split Type</label>
+                {% for radio in form.split_type %}
+                    <div class="form-check">
+                        {{ radio.tag }}
+                        <label class="form-check-label" for="{{ radio.id_for_label }}">
+                            {{ radio.choice_label }}
+                        </label>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <div id="split-equal-info" class="alert alert-info">
+                This expense will be split equally among: 
+                {% for member in members %}
+                    <strong>{{ member.username }}</strong>{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+            </div>
+
+            <div id="split-exact-inputs" class="mb-3" style="display: none;">
+                <h5>Enter Split Amounts</h5>
+                {% for member in members %}
+                <div class="input-group mb-2">
+                    <span class="input-group-text">{{ member.username }}</span>
+                    <input type="number" step="0.01" name="split_amount_{{ member.id }}" class="form-control" placeholder="0.00">
+                </div>
+                {% endfor %}
+                <div class="form-text text-danger" id="total-mismatch-warning" style="display: none;">
+                    Total split amount must match the expense amount!
+                </div>
+            </div>
+
+                <div class="mt-2 fw-bold" id="split-total-display">Total Split: $0.00 / $0.00</div>
+            </div>
+
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    const splitTypeRadios = document.querySelectorAll('input[name="split_type"]');
+                    const equalInfo = document.getElementById('split-equal-info');
+                    const exactInputs = document.getElementById('split-exact-inputs');
+                    const totalMismatchWarning = document.getElementById('total-mismatch-warning');
+                    const splitTotalDisplay = document.getElementById('split-total-display');
+                    const amountInput = document.getElementById('id_amount'); // Django form ID
+                    const splitInputs = document.querySelectorAll('input[name^="split_amount_"]');
+                    const submitBtn = document.querySelector('button[type="submit"]');
+
+                    function toggleSplitInputs() {
+                        let selectedValue;
+                        for (const radio of splitTypeRadios) {
+                            if (radio.checked) {
+                                selectedValue = radio.value;
+                                break;
+                            }
+                        }
+
+                        if (selectedValue === 'EXACT') {
+                            equalInfo.style.display = 'none';
+                            exactInputs.style.display = 'block';
+                            updateRunningTotal(); // Check immediately
+                        } else {
+                            equalInfo.style.display = 'block';
+                            exactInputs.style.display = 'none';
+                            submitBtn.disabled = false; // Always allow submit for EQUAL
+                            totalMismatchWarning.style.display = 'none';
+                        }
+                    }
+
+                    function togglePaymentInput() {
+                        const type = document.querySelector('input[name="payment_type"]:checked').value;
+                        document.getElementById('single-payer-input').style.display = (type === 'SINGLE') ? 'block' : 'none';
+                        document.getElementById('multiple-payer-input').style.display = (type === 'MULTIPLE') ? 'block' : 'none';
+                    }
+
+                    // Attach to radios (done via inline onchange, but safer here too or just use exposed func)
+                    // Since I used onchange="togglePaymentInput()" in HTML, I must expose it to window or define it outside DOMContentLoaded?
+                    // No, that's bad practice. Better to attach listeners here.
+                    const paymentTypeRadios = document.querySelectorAll('input[name="payment_type"]');
+                    paymentTypeRadios.forEach(radio => {
+                        radio.addEventListener('change', togglePaymentInput);
+                    });
+                    
+                    // Calculate total paid dynamically
+                    const paymentInputs = document.querySelectorAll('input[name^="payment_amount_"]');
+                    const totalPaidDisplay = document.getElementById('total-paid');
+                    
+                    paymentInputs.forEach(input => {
+                        input.addEventListener('input', () => {
+                             let total = 0;
+                             paymentInputs.forEach(inp => {
+                                 total += parseFloat(inp.value) || 0;
+                             });
+                             totalPaidDisplay.textContent = total.toFixed(2);
+                        });
+                    });
+
+                    function updateRunningTotal() {
+                        // Only validate if EXACT is selected
+                        let selectedValue;
+                        for (const radio of splitTypeRadios) {
+                            if (radio.checked) {
+                                selectedValue = radio.value;
+                                break;
+                            }
+                        }
+                        if (selectedValue !== 'EXACT') return;
+
+                        const totalAmount = parseFloat(amountInput.value) || 0;
+                        let runningTotal = 0;
+
+                        splitInputs.forEach(input => {
+                            runningTotal += parseFloat(input.value) || 0;
+                        });
+
+                        splitTotalDisplay.textContent = `Total Split: $${runningTotal.toFixed(2)} / $${totalAmount.toFixed(2)}`;
+
+                        // Validation Logic
+                        // Allow small float point diff
+                        const diff = runningTotal - totalAmount;
+                        
+                        // Case: Entered more than total
+                        if (diff > 0.05) {
+                            totalMismatchWarning.textContent = "Error: Total entered exceeds the expense amount!";
+                            totalMismatchWarning.style.display = 'block';
+                            totalMismatchWarning.classList.add('text-danger');
+                            submitBtn.disabled = true;
+                        } 
+                        // Case: Entered less than total (optional warning, but user might want to proceed?)
+                        // Usually splits MUST sum to total. Let's enforce equality approx.
+                        else if (Math.abs(diff) > 0.05) {
+                             // If less, just show warning but maybe don't block? Or block?
+                             // User asked "If user entered MORE... give error".
+                             // Common sense: Block if not equal.
+                             totalMismatchWarning.textContent = "Total split amount must match the expense amount!";
+                             totalMismatchWarning.style.display = 'block';
+                             submitBtn.disabled = true;
+                        } else {
+                            totalMismatchWarning.style.display = 'none';
+                            submitBtn.disabled = false;
+                        }
+                    }
+
+                    // Attach event listeners
+                    splitTypeRadios.forEach(radio => {
+                        radio.addEventListener('change', toggleSplitInputs);
+                    });
+
+                    splitInputs.forEach(input => {
+                        input.addEventListener('input', updateRunningTotal);
+                    });
+
+                    amountInput.addEventListener('input', updateRunningTotal);
+
+                    // Initial check
+                    toggleSplitInputs();
+                });
+            </script>
+
+            <button type="submit" class="btn btn-success">{% if editing %}Update{% else %}Save{% endif %} Expense</button>
+            <a href="{% url 'group_detail' group.id %}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

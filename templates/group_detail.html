@@ -1,0 +1,114 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>{{ group.name }}</h2>
+        <a href="{% url 'add_group_expense' group.id %}" class="btn btn-primary">Add Expense</a>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="row">
+        <!-- Balances Section (Left 1/4) -->
+        <div class="col-md-3 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="mb-0">Balances</h5>
+                </div>
+                <div class="card-body">
+                    {% for currency, data in balances_by_currency.items %}
+                        <h6 class="border-bottom pb-2 mb-3 mt-2 small text-muted text-uppercase">{{ currency }}</h6>
+                        
+                        {% if data.ledger_error %}
+                            <div class="alert alert-warning p-2 small">
+                                <strong>Warning:</strong> Imbalanced ledger.
+                            </div>
+                            <ul class="list-group list-group-flush mb-3 small">
+                                {% for user, balance in data.net_balances.items %}
+                                <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    {{ user.username }}
+                                    <span>
+                                        {% if balance > 0.01 %}
+                                            <span class="text-success">+{{ balance|floatformat:2 }}</span>
+                                        {% elif balance < -0.01 %}
+                                            <span class="text-danger">{{ balance|floatformat:2 }}</span>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        {% elif data.debts %}
+                            <ul class="list-group list-group-flush mb-3 small">
+                                {% for debt in data.debts %}
+                                <li class="list-group-item px-0">
+                                    <div><strong>{{ debt.debtor.username }}</strong> owes</div>
+                                    <div class="d-flex justify-content-between">
+                                        <strong>{{ debt.creditor.username }}</strong>
+                                        <span class="text-danger">{{ debt.amount }} {{ currency }}</span>
+                                    </div>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                             <p class="text-muted small">Settled up.</p>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if not balances_by_currency %}
+                        <p class="text-muted small">No data.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Expenses List (Right 3/4) -->
+        <div class="col-md-9">
+            <h3 class="mb-3">Recent Expenses</h3>
+            {% if expenses %}
+                <div class="list-group shadow-sm">
+                    {% for expense in expenses %}
+                        <div class="list-group-item list-group-item-action flex-column align-items-start p-3">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h5 class="mb-1 fw-bold">{{ expense.description }}</h5>
+                                <small class="text-muted">{{ expense.created_at|date:"M d, Y" }}</small>
+                            </div>
+                            <div class="d-flex w-100 justify-content-between align-items-center mt-2">
+                                <div>
+                                     <p class="mb-1">
+                                        <span class="badge bg-primary me-2">{{ expense.currency }}</span>
+                                        <span class="fs-5 fw-bold">{{ expense.amount }}</span>
+                                        <span class="text-muted small mx-1">paid by</span>
+                                        {% with payments=expense.payments.all %}
+                                            {% if payments.count == 1 %}
+                                                <strong>{{ payments.first.user.username }}</strong>
+                                            {% else %}
+                                                {% for payment in payments %}
+                                                    <strong>{{ payment.user.username }}</strong> ({{ payment.amount }}){% if not forloop.last %}, {% endif %}
+                                                {% endfor %}
+                                            {% endif %}
+                                        {% endwith %}
+                                     </p>
+                                     <small class="text-muted">
+                                        {% for split in expense.splits.all %}
+                                            {{ split.user.username }} owes {{ split.amount_owed }}{% if not forloop.last %} &bull; {% endif %}
+                                        {% endfor %}
+                                     </small>
+                                </div>
+                                <div class="btn-group">
+                                     <a href="{% url 'edit_group_expense' expense.id %}" class="btn btn-outline-secondary btn-sm" title="Edit"><i class="bi bi-pencil"></i> Edit</a>
+                                     <a href="{% url 'delete_group_expense' expense.id %}" class="btn btn-outline-danger btn-sm" title="Delete"><i class="bi bi-trash"></i></a>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="alert alert-light text-center py-5">
+                    <p class="mb-0 text-muted">No expenses recorded yet. Start by adding one!</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "layout.html" %}
+
+{% block title %}Group Expenses{% endblock %}
+
+{% block content %}
+    <h1>Group Expenses</h1>
+    {% comment %} <a href="{% url 'group_expense_add' %}" class="btn btn-primary">Add Expense</a> {% endcomment %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Expense Name</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for expense in expenses_list %}
+                <tr>
+                    <td>{{ expense.name }}</td>
+                    <td>{{ expense.amount }}</td>
+                    <td>{{ expense.date }}</td>
+                    <td>
+                        {% comment %} <a href="{% url 'group_expense_edit' group.id expense.id %}" class="btn btn-primary">Edit</a>
+                        <a href="{% url 'group_expense_delete' group.id expense.id %}" class="btn btn-danger">Delete</a> {% endcomment %}
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+{% endblock %}
