@@ -18,8 +18,23 @@ def get_user_balance_in_group(user, group):
     """
     currencies = GroupExpense.objects.filter(group=group, deleted=0).values_list('currency', flat=True).distinct()
     for currency in currencies:
-        paid = ExpensePayment.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount'))['amount__sum'] or 0
-        owed = ExpenseSplit.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
+        # Filter ExpensePayment and ExpenseSplit by deleted=0 as well for robustness
+        paid = ExpensePayment.objects.filter(
+            expense__group=group, 
+            expense__currency=currency, 
+            user=user, 
+            expense__deleted=0,
+            deleted=0
+        ).aggregate(Sum('amount'))['amount__sum'] or 0
+        
+        owed = ExpenseSplit.objects.filter(
+            expense__group=group, 
+            expense__currency=currency, 
+            user=user, 
+            expense__deleted=0,
+            deleted=0
+        ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
+        
         if abs(paid - owed) > 0.01:
             return True # User has outstanding balance
     return False
@@ -39,8 +54,22 @@ def group_list(request):
             
         balances = []
         for currency in currencies:
-            paid = ExpensePayment.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount'))['amount__sum'] or 0
-            owed = ExpenseSplit.objects.filter(expense__group=group, expense__currency=currency, user=user, expense__deleted=0).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
+            paid = ExpensePayment.objects.filter(
+                expense__group=group, 
+                expense__currency=currency, 
+                user=user, 
+                expense__deleted=0,
+                deleted=0
+            ).aggregate(Sum('amount'))['amount__sum'] or 0
+            
+            owed = ExpenseSplit.objects.filter(
+                expense__group=group, 
+                expense__currency=currency, 
+                user=user, 
+                expense__deleted=0,
+                deleted=0
+            ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
+            
             net = float(paid - owed)
             if abs(net) > 0.01:
                 balances.append({'currency': currency, 'amount': net})
@@ -117,6 +146,7 @@ def group_delete(request, group_id):
 @login_required
 def group_detail(request, group_id):
     group = get_object_or_404(groups, pk=group_id, users=request.user, deleted=0)
+    # Filter only non-deleted expenses
     group_expenses = GroupExpense.objects.filter(group=group, deleted=0).order_by('-created_at')
     
     # Identify currencies used in this group
@@ -133,8 +163,23 @@ def group_detail(request, group_id):
         net_balances = {}
         for member in members:
             # Filter by currency
-            paid = ExpensePayment.objects.filter(expense__group=group, expense__currency=currency, user=member, expense__deleted=0).aggregate(Sum('amount'))['amount__sum'] or 0
-            owed = ExpenseSplit.objects.filter(expense__group=group, expense__currency=currency, user=member, expense__deleted=0).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
+             # Add deleted=0 filter
+            paid = ExpensePayment.objects.filter(
+                expense__group=group, 
+                expense__currency=currency, 
+                user=member, 
+                expense__deleted=0,
+                deleted=0
+            ).aggregate(Sum('amount'))['amount__sum'] or 0
+            
+            owed = ExpenseSplit.objects.filter(
+                expense__group=group, 
+                expense__currency=currency, 
+                user=member, 
+                expense__deleted=0,
+                deleted=0
+            ).aggregate(Sum('amount_owed'))['amount_owed__sum'] or 0
+            
             net_balances[member] = float(paid - owed)
         
         # Check Ledger Integrity
@@ -386,8 +431,9 @@ def edit_group_expense(request, expense_id):
             # Save Expense
             expense = form.save()
 
-            # Update Payments (Delete Old, Create New)
-            ExpensePayment.objects.filter(expense=expense).delete()
+            # Update Payments (SOFT DELETE Old, Create New)
+            # Use update(deleted=True) instead of delete()
+            ExpensePayment.objects.filter(expense=expense).update(deleted=True)
             
             if payment_type == 'MULTIPLE':
                  for member in members:
@@ -405,10 +451,10 @@ def edit_group_expense(request, expense_id):
                     amount=amount
                 )
 
-            # Re-Calculate Splits
+            # Re-Calculate Splits (SOFT DELETE Old)
             # Crude approach: Delete all existing splits and recreate
             # In a better app, we might try to update existing ones, but recreation is safer for consistency
-            ExpenseSplit.objects.filter(expense=expense).delete()
+            ExpenseSplit.objects.filter(expense=expense).update(deleted=True)
 
             if split_type == 'EQUAL':
                 split_amount = amount / involved_members.count()
