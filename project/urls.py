@@ -28,6 +28,7 @@ urlpatterns = [
     path('accounts/', include('django.contrib.auth.urls')),
     path('register/', views.user_registration, name='register'),
     path('groups/', include('groups.urls')),
+    path('notifications/', include('notifications.urls')),
     path('', RedirectView.as_view(url='/expenses/', permanent=False)),
 
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
